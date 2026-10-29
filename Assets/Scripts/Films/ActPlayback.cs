@@ -10,7 +10,7 @@ namespace ChimeralTheater.Films
     public class ActPlayback
     {
         public readonly Act Act;
-        public readonly SphereAvatar Avatar;
+        public readonly Avatars.IAvatarInstance Avatar;
 
         /// <summary>Time into the take's playback session, shared by every act.</summary>
         public float SessionTime { get; private set; }
@@ -20,6 +20,18 @@ namespace ChimeralTheater.Films
         public ActPlayback(Act act)
         {
             Act = act;
+            // Try to load the recorded avatar from the act; fall back to a simple sphere if unavailable.
+            // This handles cases where the avatar asset has been moved, deleted, or is still loading.
+            if (!string.IsNullOrEmpty(act.AvatarAssetPath))
+            {
+                var chavi = Avatars.AvatarConversionPipeline.LoadAvatar(act.AvatarAssetPath);
+                if (chavi != null)
+                {
+                    Avatar = new Avatars.ChaviAvatar(chavi, act.Number);
+                    return;
+                }
+            }
+
             Avatar = new SphereAvatar(act.Number);
         }
 

@@ -5,14 +5,11 @@ namespace ChimeralTheater.Films
 {
     /// <summary>
     /// The stand-in that emulates a recorded performer's appearance while an act plays back:
-    /// a sphere for the head and one for each hand, generated entirely in code. Each act gets
-    /// its own hue so simultaneous stand-ins can be told apart.
+    /// a sphere for the head and one for each hand, cloned from the SphereStandIn prefab. Each act
+    /// gets its own hue so simultaneous stand-ins can be told apart.
     /// </summary>
-    public class SphereAvatar
+    public class SphereAvatar : ChimeralTheater.Films.Avatars.IAvatarInstance
     {
-        public const float HeadRadius = 0.2f;
-        public const float HandRadius = 0.09f;
-
         readonly Transform root;
         readonly Transform head;
         readonly Transform leftHand;
@@ -25,12 +22,13 @@ namespace ChimeralTheater.Films
 
         public SphereAvatar(int actNumber)
         {
-            root = new GameObject($"Act {actNumber} Stand-in").transform;
+            root = RuntimePrefabs.Instantiate(RuntimePrefabs.SphereStandIn).transform;
+            root.name = $"Act {actNumber} Stand-in";
 
             Color color = GetColor(actNumber);
-            head = CreateSphere("Head", HeadRadius, color);
-            leftHand = CreateSphere("Left Hand", HandRadius, color);
-            rightHand = CreateSphere("Right Hand", HandRadius, color);
+            head = Tint(root.Find("Head"), color);
+            leftHand = Tint(root.Find("Left Hand"), color);
+            rightHand = Tint(root.Find("Right Hand"), color);
         }
 
         public void Apply(in ActFrame frame)
@@ -92,20 +90,12 @@ namespace ChimeralTheater.Films
             target.SetPositionAndRotation(pose.Position, pose.Rotation);
         }
 
-        Transform CreateSphere(string name, float radius, Color color)
+        Transform Tint(Transform sphere, Color color)
         {
-            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sphere.name = name;
-            sphere.transform.SetParent(root, false);
-            sphere.transform.localScale = Vector3.one * (radius * 2f);
-
-            DestroyObject(sphere.GetComponent<Collider>());
-
-            var material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-            material.color = color;
+            var material = RuntimeMaterials.CreateLit(color);
             materials.Add(material);
             sphere.GetComponent<MeshRenderer>().sharedMaterial = material;
-            return sphere.transform;
+            return sphere;
         }
     }
 }

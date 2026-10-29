@@ -2,7 +2,8 @@
     "name": "ChimeralTheater.Films",
     "rootNamespace": "ChimeralTheater.Films",
     "references": [
-        "UniRes.Runtime"
+        "UniRes.Runtime",
+        "glTFast"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

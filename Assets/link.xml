@@ -1,0 +1,8 @@
+<!--
+  UniRes creates resource classes with Activator.CreateInstance and sets their [Export] fields through
+  reflection, so IL2CPP's managed code stripping cannot see that they are used. Keep both assemblies whole.
+-->
+<linker>
+  <assembly fullname="UniRes.Runtime" preserve="all"/>
+  <assembly fullname="ChimeralTheater.Films" preserve="all"/>
+</linker>

@@ -19,6 +19,9 @@ namespace ChimeralTheater.Films
         /// <summary>Position in its take's numbering, used for the display name.</summary>
         [Export] public int Number;
 
+        /// <summary>Optional path to an avatar (.chavi) in the Asset Inventory assigned to this act.</summary>
+        [Export] public string AvatarAssetPath = "";
+
         /// <summary>Number of recorded frames. Stays correct while <see cref="Times"/> and <see cref="Poses"/> are released.</summary>
         [Export] public int FrameCount;
 

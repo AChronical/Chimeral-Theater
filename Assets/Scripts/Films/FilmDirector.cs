@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ChimeralTheater.Films.Avatars;
 using UnityEngine;
 
 namespace ChimeralTheater.Films
@@ -52,6 +53,12 @@ namespace ChimeralTheater.Films
         readonly ActRecorder recorder = new ActRecorder();
         int nextTakeNumber = 1;
 
+        ChaviAvatar selfAvatar;
+        string selfAvatarPath = "";
+
+        /// <summary>The performer's own avatar while one is worn or the selected act has one; null otherwise.</summary>
+        public ChaviAvatar SelfAvatar => selfAvatar;
+
         Transform body;
         Transform head;
         Transform leftHand;
@@ -66,6 +73,11 @@ namespace ChimeralTheater.Films
         void LateUpdate()
         {
             Tick(Time.deltaTime);
+        }
+
+        void OnDestroy()
+        {
+            DisposeSelfAvatar();
         }
 
         /// <summary>Points the recorder at the performer's transforms. Tests call this directly since Awake does not run in edit mode.</summary>
@@ -304,6 +316,50 @@ namespace ChimeralTheater.Films
 
                     break;
             }
+
+            UpdateSelfAvatar();
+        }
+
+        /// <summary>The avatar the performer should see themselves as right now: the selected act's avatar
+        /// from the countdown through the recording, otherwise whatever they are wearing.</summary>
+        string DesiredSelfAvatarPath()
+        {
+            bool recording = State == DirectorState.Countdown || State == DirectorState.Recording;
+            if (recording && SelectedAct != null && !string.IsNullOrEmpty(SelectedAct.AvatarAssetPath))
+                return SelectedAct.AvatarAssetPath;
+
+            return AvatarWearState.Worn;
+        }
+
+        void UpdateSelfAvatar()
+        {
+            string desired = DesiredSelfAvatarPath();
+            if (head == null)
+                desired = "";
+
+            if (desired != selfAvatarPath || (selfAvatar != null && !selfAvatar.IsAlive))
+            {
+                DisposeSelfAvatar();
+                selfAvatarPath = desired;
+                if (!string.IsNullOrEmpty(desired))
+                {
+                    ChaviResource chavi = AvatarConversionPipeline.LoadAvatar(desired);
+                    if (chavi != null)
+                        selfAvatar = new ChaviAvatar(chavi, 0, selfMode: true);
+                    else
+                        Debug.LogWarning($"[FilmDirector] Could not load avatar '{desired}' for the performer.");
+                }
+            }
+
+            if (selfAvatar != null)
+                selfAvatar.Apply(ActFrame.Capture(body, head, leftHand, rightHand));
+        }
+
+        void DisposeSelfAvatar()
+        {
+            selfAvatar?.Destroy();
+            selfAvatar = null;
+            selfAvatarPath = "";
         }
 
         void StageOtherActs(Act except)

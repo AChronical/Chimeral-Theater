@@ -25,6 +25,34 @@ namespace ChimeralTheater.Films
         }
 
         /// <summary>
+        /// Assigns the avatar that plays this act. The recording is independent of the avatar, so only
+        /// the path changes. A recorded act's frames live in its file, not in the take's header, so the
+        /// file is rewritten from a fresh load: saving the header alone would overwrite the recording
+        /// with no frames.
+        /// </summary>
+        public static void SetAvatar(Take take, Act act, string avatarPath)
+        {
+            act.AvatarAssetPath = avatarPath ?? "";
+            if (act.IsEmpty || act.IsBuiltIn)
+                return;
+
+            Act full = act.HasFramesLoaded ? act : LoadFrames(act);
+            if (full == null)
+                return;
+
+            full.AvatarAssetPath = act.AvatarAssetPath;
+            if (full == act)
+            {
+                Save(take, act);
+                return;
+            }
+
+            // No ChangePath: the loaded copy must not take the file's path over, or the take's own act
+            // would lose it and could no longer find its recording.
+            ResourceSaver.Save(full, PathFor(take, act), SaveFlags.Binary);
+        }
+
+        /// <summary>
         /// Reads a fresh copy of the act with its frames from the file. Returns null for an act
         /// that has not been recorded. The caller owns the copy; the take's act is untouched.
         /// </summary>

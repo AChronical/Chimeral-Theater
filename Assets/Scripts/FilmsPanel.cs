@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using System.IO;
 using ChimeralTheater.Films;
+using ChimeralTheater.Films.Avatars;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -29,6 +31,13 @@ namespace ChimeralTheater.UI
         [SerializeField] private Button recordButton;
         [SerializeField] private Button playButton;
 
+        [Header("Avatar Picker View")]
+        [SerializeField] private GameObject avatarPickerView;
+        [SerializeField] private Text avatarPickerTitleText;
+        [SerializeField] private RectTransform avatarListContent;
+        [SerializeField] private GameObject avatarRowTemplate;
+        [SerializeField] private Button avatarBackButton;
+
         [Header("Recording View")]
         [SerializeField] private GameObject recordingView;
         [SerializeField] private Button stopRecordingButton;
@@ -38,12 +47,16 @@ namespace ChimeralTheater.UI
 
         static readonly Color SelectedRowColor = new Color(0.35f, 0.35f, 0.4f, 0.95f);
         static readonly Color NormalRowColor = new Color(0.2f, 0.2f, 0.22f, 0.95f);
+        static readonly Color AddButtonColor = new Color(0.2f, 0.45f, 0.25f, 0.95f);
         static readonly Color DisabledColor = new Color(0.25f, 0.25f, 0.27f, 0.6f);
         static readonly Color EmptyActColor = new Color(1f, 0.85f, 0.2f, 1f);
         static readonly Color RecordedActColor = Color.white;
 
         readonly List<GameObject> takeRows = new List<GameObject>();
         readonly List<GameObject> actRows = new List<GameObject>();
+        readonly List<GameObject> avatarRows = new List<GameObject>();
+
+        private Act pickerTargetAct;
 
         public FilmDirector Director { get => director; set => director = value; }
 
@@ -60,6 +73,11 @@ namespace ChimeralTheater.UI
         public Button BackButton { get => backButton; set => backButton = value; }
         public Button RecordButton { get => recordButton; set => recordButton = value; }
         public Button PlayButton { get => playButton; set => playButton = value; }
+        public GameObject AvatarPickerView { get => avatarPickerView; set => avatarPickerView = value; }
+        public Text AvatarPickerTitleText { get => avatarPickerTitleText; set => avatarPickerTitleText = value; }
+        public RectTransform AvatarListContent { get => avatarListContent; set => avatarListContent = value; }
+        public GameObject AvatarRowTemplate { get => avatarRowTemplate; set => avatarRowTemplate = value; }
+        public Button AvatarBackButton { get => avatarBackButton; set => avatarBackButton = value; }
         public GameObject RecordingView { get => recordingView; set => recordingView = value; }
         public Button StopRecordingButton { get => stopRecordingButton; set => stopRecordingButton = value; }
 
@@ -80,6 +98,7 @@ namespace ChimeralTheater.UI
             recordButton?.onClick.AddListener(OnRecordClicked);
             playButton?.onClick.AddListener(() => director?.PlayTake());
             stopRecordingButton?.onClick.AddListener(OnStopRecordingClicked);
+            avatarBackButton?.onClick.AddListener(CloseAvatarPicker);
 
             Rebuild();
         }
@@ -149,6 +168,7 @@ namespace ChimeralTheater.UI
         {
             takesView.SetActive(true);
             takeDetailView.SetActive(false);
+            avatarPickerView.SetActive(false);
             recordingView.SetActive(false);
 
             foreach (Take take in director.Takes)
@@ -163,7 +183,13 @@ namespace ChimeralTheater.UI
         {
             takesView.SetActive(false);
             takeDetailView.SetActive(true);
+            avatarPickerView.SetActive(false);
             recordingView.SetActive(false);
+
+            // Called both from Rebuild() (which already clears rows) and directly after picking
+            // an avatar, which doesn't; clearing here too keeps either path from piling up
+            // duplicate act rows on top of the ones from the previous call.
+            ClearRows(actRows);
 
             Take take = director.OpenTake;
             if (takeTitleText != null)
@@ -174,8 +200,12 @@ namespace ChimeralTheater.UI
                 Act act = take.Acts[i];
                 GameObject row = InstantiateRow(actRowTemplate, actsListContent, actRows);
 
+                string avLabel = string.IsNullOrEmpty(act.AvatarAssetPath)
+                    ? "Spheres"
+                    : Path.GetFileNameWithoutExtension(act.AvatarAssetPath);
+
                 // An act with no recording shows in yellow until something is recorded into it.
-                SetRowText(row, $"Act {act.Number}", act.IsEmpty ? EmptyActColor : RecordedActColor);
+                SetRowText(row, $"Act {act.Number} [{avLabel}]", act.IsEmpty ? EmptyActColor : RecordedActColor);
 
                 Act captured = act;
                 int index = i;
@@ -185,7 +215,16 @@ namespace ChimeralTheater.UI
                         director.SelectAct(captured);
                 });
 
-                GameObject deleteTarget = row.transform.Find("Delete")?.gameObject;
+                // The act row template is Label | Avatar | Delete.
+                GameObject deleteTarget = row.transform.Find("Delete").gameObject;
+                GameObject avatarTarget = row.transform.Find("Avatar").gameObject;
+                avatarTarget.GetComponentInChildren<Text>().text = avLabel;
+                BindRowButton(avatarTarget, () =>
+                {
+                    if (director.CanEdit)
+                        OpenAvatarPicker(captured);
+                });
+
                 BindDeleteButton(deleteTarget, () =>
                 {
                     if (director.CanEdit)
@@ -200,20 +239,72 @@ namespace ChimeralTheater.UI
             RefreshActionButtons();
         }
 
+        void OpenAvatarPicker(Act act)
+        {
+            pickerTargetAct = act;
+            takesView.SetActive(false);
+            takeDetailView.SetActive(false);
+            recordingView.SetActive(false);
+
+            avatarPickerView.SetActive(true);
+
+            if (avatarPickerTitleText != null)
+                avatarPickerTitleText.text = $"Select Avatar for Act {act.Number}";
+
+            ClearRows(avatarRows);
+
+            // Default spheres option
+            GameObject defaultRow = InstantiateRow(avatarRowTemplate, avatarListContent, avatarRows);
+            SetRowText(defaultRow, "Default Stand-in (Spheres)");
+            BindRowButton(defaultRow, () => SelectAvatarForAct(""));
+
+            // Converted .chavi avatars from Asset Inventory
+            string[] avatars = AssetStorePaths.GetInventoryAvatars();
+            foreach (string avPath in avatars)
+            {
+                string name = Path.GetFileNameWithoutExtension(avPath);
+                GameObject avRow = InstantiateRow(avatarRowTemplate, avatarListContent, avatarRows);
+                SetRowText(avRow, $"👤 {name}");
+                string capturedPath = avPath;
+                BindRowButton(avRow, () => SelectAvatarForAct(capturedPath));
+            }
+        }
+
+        void SelectAvatarForAct(string avatarPath)
+        {
+            if (pickerTargetAct != null)
+            {
+                if (director != null && director.OpenTake != null)
+                    ActStore.SetAvatar(director.OpenTake, pickerTargetAct, avatarPath);
+                else
+                    pickerTargetAct.AvatarAssetPath = avatarPath ?? "";
+            }
+
+            CloseAvatarPicker();
+        }
+
+        void CloseAvatarPicker()
+        {
+            pickerTargetAct = null;
+            ClearRows(avatarRows);
+            ShowTakeDetailView();
+        }
+
         void ShowRecordingView()
         {
             takesView.SetActive(false);
             takeDetailView.SetActive(false);
+            avatarPickerView.SetActive(false);
             recordingView.SetActive(true);
         }
 
         void RefreshActionButtons()
         {
-            SetButtonEnabled(addTakeButton, director.CanEdit);
-            SetButtonEnabled(addActButton, director.CanEdit);
-            SetButtonEnabled(backButton, director.CanEdit);
-            SetButtonEnabled(recordButton, director.CanRecord);
-            SetButtonEnabled(playButton, director.CanPlay);
+            SetButtonEnabled(addTakeButton, director.CanEdit, AddButtonColor);
+            SetButtonEnabled(addActButton, director.CanEdit, AddButtonColor);
+            SetButtonEnabled(backButton, director.CanEdit, NormalRowColor);
+            SetButtonEnabled(recordButton, director.CanRecord, NormalRowColor);
+            SetButtonEnabled(playButton, director.CanPlay, NormalRowColor);
         }
 
         // --- Row helpers ---
@@ -263,7 +354,7 @@ namespace ChimeralTheater.UI
                 button.onClick.AddListener(onClick);
         }
 
-        static void SetButtonEnabled(Button button, bool enabled)
+        static void SetButtonEnabled(Button button, bool enabled, Color enabledColor)
         {
             if (button == null)
                 return;
@@ -273,7 +364,7 @@ namespace ChimeralTheater.UI
             // Color transitions never fire without an event system, so tint disabled buttons by hand.
             Image image = button.GetComponent<Image>();
             if (image != null)
-                image.color = enabled ? NormalRowColor : DisabledColor;
+                image.color = enabled ? enabledColor : DisabledColor;
         }
     }
 }

@@ -14,10 +14,16 @@ namespace ChimeralTheater.UI
         [SerializeField] private Text tabTitleText;
         [SerializeField] private GameObject settingsContent;
         [SerializeField] private GameObject filmsContent;
+        [SerializeField] private GameObject filesContent;
+        [SerializeField] private GameObject assetInventoryContent;
         [SerializeField] private Button settingsTabButton;
         [SerializeField] private Button filmsTabButton;
+        [SerializeField] private Button filesTabButton;
+        [SerializeField] private Button assetInventoryTabButton;
         [SerializeField] private Image settingsTabImage;
         [SerializeField] private Image filmsTabImage;
+        [SerializeField] private Image filesTabImage;
+        [SerializeField] private Image assetInventoryTabImage;
         [SerializeField] private Slider locomotionSlider;
         [SerializeField] private Slider rotationSlider;
         [SerializeField] private Text locomotionValueText;
@@ -43,6 +49,8 @@ namespace ChimeralTheater.UI
         private RectTransform panelRect;
         private RectTransform settingsTabRect;
         private RectTransform filmsTabRect;
+        private RectTransform filesTabRect;
+        private RectTransform assetInventoryTabRect;
         private RectTransform locomotionSliderRect;
         private RectTransform rotationSliderRect;
 
@@ -52,6 +60,7 @@ namespace ChimeralTheater.UI
         private bool isPointerOnPanel;
         private Vector3 currentPanelHitPoint;
         private Slider activeDraggingSlider;
+        private Scrollbar activeDraggingScrollbar;
 
         private const string MapName = "Chimeral Theater";
         private static readonly Color TabNormalColor = new Color(0.2f, 0.2f, 0.22f, 0.95f);
@@ -64,10 +73,16 @@ namespace ChimeralTheater.UI
         public Text TabTitleText { get => tabTitleText; set => tabTitleText = value; }
         public GameObject SettingsContent { get => settingsContent; set => settingsContent = value; }
         public GameObject FilmsContent { get => filmsContent; set => filmsContent = value; }
+        public GameObject FilesContent { get => filesContent; set => filesContent = value; }
+        public GameObject AssetInventoryContent { get => assetInventoryContent; set => assetInventoryContent = value; }
         public Button SettingsTabButton { get => settingsTabButton; set => settingsTabButton = value; }
         public Button FilmsTabButton { get => filmsTabButton; set => filmsTabButton = value; }
+        public Button FilesTabButton { get => filesTabButton; set => filesTabButton = value; }
+        public Button AssetInventoryTabButton { get => assetInventoryTabButton; set => assetInventoryTabButton = value; }
         public Image SettingsTabImage { get => settingsTabImage; set => settingsTabImage = value; }
         public Image FilmsTabImage { get => filmsTabImage; set => filmsTabImage = value; }
+        public Image FilesTabImage { get => filesTabImage; set => filesTabImage = value; }
+        public Image AssetInventoryTabImage { get => assetInventoryTabImage; set => assetInventoryTabImage = value; }
         public Slider LocomotionSlider { get => locomotionSlider; set => locomotionSlider = value; }
         public Slider RotationSlider { get => rotationSlider; set => rotationSlider = value; }
         public Text LocomotionValueText { get => locomotionValueText; set => locomotionValueText = value; }
@@ -172,6 +187,18 @@ namespace ChimeralTheater.UI
             {
                 filmsTabRect = filmsTabButton.GetComponent<RectTransform>();
                 filmsTabButton.onClick.AddListener(() => SelectTab(1));
+            }
+
+            if (filesTabButton != null)
+            {
+                filesTabRect = filesTabButton.GetComponent<RectTransform>();
+                filesTabButton.onClick.AddListener(() => SelectTab(2));
+            }
+
+            if (assetInventoryTabButton != null)
+            {
+                assetInventoryTabRect = assetInventoryTabButton.GetComponent<RectTransform>();
+                assetInventoryTabButton.onClick.AddListener(() => SelectTab(3));
             }
 
             if (locomotionSlider != null)
@@ -366,39 +393,45 @@ namespace ChimeralTheater.UI
             // Update tab hover highlights
             bool overSettings = IsHitInRect(settingsTabRect, hitPoint);
             bool overFilms = IsHitInRect(filmsTabRect, hitPoint);
+            bool overFiles = IsHitInRect(filesTabRect, hitPoint);
+            bool overInventory = IsHitInRect(assetInventoryTabRect, hitPoint);
 
-            if (settingsTabImage != null)
-            {
-                if (overSettings)
-                    settingsTabImage.color = TabHoverColor;
-                else
-                    settingsTabImage.color = selectedTab == 0 ? TabSelectedColor : TabNormalColor;
-            }
-
-            if (filmsTabImage != null)
-            {
-                if (overFilms)
-                    filmsTabImage.color = TabHoverColor;
-                else
-                    filmsTabImage.color = selectedTab == 1 ? TabSelectedColor : TabNormalColor;
-            }
+            UpdateTabImageColor(settingsTabImage, overSettings, selectedTab == 0);
+            UpdateTabImageColor(filmsTabImage, overFilms, selectedTab == 1);
+            UpdateTabImageColor(filesTabImage, overFiles, selectedTab == 2);
+            UpdateTabImageColor(assetInventoryTabImage, overInventory, selectedTab == 3);
 
             // Drag slider if active
             if (activeDraggingSlider != null)
             {
                 UpdateSliderFromHit(activeDraggingSlider, hitPoint);
             }
+
+            if (activeDraggingScrollbar != null)
+                UpdateScrollbarFromHit(activeDraggingScrollbar, hitPoint);
+        }
+
+        private void UpdateTabImageColor(Image img, bool isHovered, bool isSelected)
+        {
+            if (img == null)
+                return;
+
+            if (isHovered)
+                img.color = TabHoverColor;
+            else
+                img.color = isSelected ? TabSelectedColor : TabNormalColor;
         }
 
         private void ClearPointer()
         {
             isPointerOnPanel = false;
             activeDraggingSlider = null;
+            activeDraggingScrollbar = null;
 
-            if (settingsTabImage != null)
-                settingsTabImage.color = selectedTab == 0 ? TabSelectedColor : TabNormalColor;
-            if (filmsTabImage != null)
-                filmsTabImage.color = selectedTab == 1 ? TabSelectedColor : TabNormalColor;
+            UpdateTabImageColor(settingsTabImage, false, selectedTab == 0);
+            UpdateTabImageColor(filmsTabImage, false, selectedTab == 1);
+            UpdateTabImageColor(filesTabImage, false, selectedTab == 2);
+            UpdateTabImageColor(assetInventoryTabImage, false, selectedTab == 3);
         }
 
         private void BeginInteraction(InputAction.CallbackContext context)
@@ -411,6 +444,15 @@ namespace ChimeralTheater.UI
             // through onClick too, so this covers every clickable in the panel.
             if (DispatchButtonClick(currentPanelHitPoint))
                 return;
+
+            // Grab a list's scrollbar and drag it while the trigger is held.
+            Scrollbar bar = FindScrollbarAt(currentPanelHitPoint);
+            if (bar != null)
+            {
+                activeDraggingScrollbar = bar;
+                UpdateScrollbarFromHit(bar, currentPanelHitPoint);
+                return;
+            }
 
             // Click or start dragging Locomotion Slider
             if (selectedTab == 0 && IsHitInRect(locomotionSliderRect, currentPanelHitPoint))
@@ -446,13 +488,14 @@ namespace ChimeralTheater.UI
                     continue;
 
                 RectTransform rect = button.GetComponent<RectTransform>();
-                if (rect == null || !IsHitInRect(rect, worldHitPoint))
+                if (rect == null || !IsHitInRect(rect, worldHitPoint) || !IsInsideMasks(button.transform, worldHitPoint))
                     continue;
 
                 // Depth in the hierarchy decides which overlapping button wins: a delete X on
-                // top of a row button is deeper in the hierarchy and wins the click.
+                // top of a row button is deeper in the hierarchy and wins the click. At equal depth
+                // the later one in hierarchy order is drawn on top, so it wins.
                 int depth = GetHierarchyDepth(button.transform);
-                if (depth > bestDepth)
+                if (depth >= bestDepth)
                 {
                     best = button;
                     bestDepth = depth;
@@ -478,9 +521,54 @@ namespace ChimeralTheater.UI
             return depth;
         }
 
+        /// <summary>True when the point is inside every mask above the element. A list row scrolled out of
+        /// its viewport is still in the hierarchy but hidden by the mask, so it must not take clicks.</summary>
+        private bool IsInsideMasks(Transform element, Vector3 worldHitPoint)
+        {
+            for (Transform t = element.parent; t != null; t = t.parent)
+            {
+                bool clips = (t.TryGetComponent(out Mask mask) && mask.enabled) ||
+                             (t.TryGetComponent(out RectMask2D rectMask) && rectMask.enabled);
+                if (clips && !IsHitInRect(t as RectTransform, worldHitPoint))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private Scrollbar FindScrollbarAt(Vector3 worldHitPoint)
+        {
+            if (panel == null)
+                return null;
+
+            foreach (Scrollbar bar in panel.GetComponentsInChildren<Scrollbar>(false))
+            {
+                if (bar.IsActive() && bar.interactable && IsHitInRect(bar.GetComponent<RectTransform>(), worldHitPoint))
+                    return bar;
+            }
+
+            return null;
+        }
+
+        /// <summary>Puts the scrollbar's handle centre under the pointer along the bar.</summary>
+        private void UpdateScrollbarFromHit(Scrollbar bar, Vector3 worldHitPoint)
+        {
+            RectTransform area = bar.handleRect != null && bar.handleRect.parent is RectTransform sliding
+                ? sliding
+                : bar.GetComponent<RectTransform>();
+            Vector3 local = area.InverseTransformPoint(worldHitPoint);
+
+            float handleSpan = area.rect.height * bar.size;
+            float t = Mathf.InverseLerp(area.rect.yMin + handleSpan * 0.5f, area.rect.yMax - handleSpan * 0.5f, local.y);
+            if (bar.direction == Scrollbar.Direction.TopToBottom)
+                t = 1f - t;
+            bar.value = Mathf.Clamp01(t);
+        }
+
         private void EndInteraction(InputAction.CallbackContext context)
         {
             activeDraggingSlider = null;
+            activeDraggingScrollbar = null;
         }
 
         private void UpdateSliderFromHit(Slider slider, Vector3 worldHitPoint)
@@ -539,30 +627,51 @@ namespace ChimeralTheater.UI
             {
                 if (tabTitleText != null)
                     tabTitleText.text = "Settings";
-                if (settingsContent != null)
-                    settingsContent.SetActive(true);
-                if (filmsContent != null)
-                    filmsContent.SetActive(false);
-
-                if (settingsTabImage != null)
-                    settingsTabImage.color = TabSelectedColor;
-                if (filmsTabImage != null)
-                    filmsTabImage.color = TabNormalColor;
+                if (settingsContent != null) settingsContent.SetActive(true);
+                if (filmsContent != null) filmsContent.SetActive(false);
+                if (filesContent != null) filesContent.SetActive(false);
+                if (assetInventoryContent != null) assetInventoryContent.SetActive(false);
             }
-            else
+            else if (selectedTab == 1)
             {
                 if (tabTitleText != null)
                     tabTitleText.text = "Films";
-                if (settingsContent != null)
-                    settingsContent.SetActive(false);
-                if (filmsContent != null)
-                    filmsContent.SetActive(true);
-
-                if (settingsTabImage != null)
-                    settingsTabImage.color = TabNormalColor;
-                if (filmsTabImage != null)
-                    filmsTabImage.color = TabSelectedColor;
+                if (settingsContent != null) settingsContent.SetActive(false);
+                if (filmsContent != null) filmsContent.SetActive(true);
+                if (filesContent != null) filesContent.SetActive(false);
+                if (assetInventoryContent != null) assetInventoryContent.SetActive(false);
             }
+            else if (selectedTab == 2)
+            {
+                if (tabTitleText != null)
+                    tabTitleText.text = "Files";
+                if (settingsContent != null) settingsContent.SetActive(false);
+                if (filmsContent != null) filmsContent.SetActive(false);
+                if (filesContent != null)
+                {
+                    filesContent.SetActive(true);
+                    filesContent.GetComponent<UserFilesPanel>()?.Refresh();
+                }
+                if (assetInventoryContent != null) assetInventoryContent.SetActive(false);
+            }
+            else if (selectedTab == 3)
+            {
+                if (tabTitleText != null)
+                    tabTitleText.text = "Asset Inventory";
+                if (settingsContent != null) settingsContent.SetActive(false);
+                if (filmsContent != null) filmsContent.SetActive(false);
+                if (filesContent != null) filesContent.SetActive(false);
+                if (assetInventoryContent != null)
+                {
+                    assetInventoryContent.SetActive(true);
+                    assetInventoryContent.GetComponent<AssetInventoryPanel>()?.Refresh();
+                }
+            }
+
+            UpdateTabImageColor(settingsTabImage, false, selectedTab == 0);
+            UpdateTabImageColor(filmsTabImage, false, selectedTab == 1);
+            UpdateTabImageColor(filesTabImage, false, selectedTab == 2);
+            UpdateTabImageColor(assetInventoryTabImage, false, selectedTab == 3);
         }
 
         private void OnLocomotionSpeedChanged(float value)

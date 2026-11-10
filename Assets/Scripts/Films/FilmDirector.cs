@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ChimeralTheater.Films.Avatars;
+using ChimeralTheater.Films.Props;
 using UnityEngine;
 
 namespace ChimeralTheater.Films
@@ -17,7 +18,9 @@ namespace ChimeralTheater.Films
     /// Owns the films tab's session: the list of takes, which take and act are selected, and the
     /// record/play state machine. The whole thing advances through <see cref="Tick"/>, which the
     /// scene drives from LateUpdate and tests drive directly, so recording, countdown and
-    /// playback all share one clock and stay in sync.
+    /// playback all share one clock and stay in sync. The director also owns the performer's two
+    /// live prop-grabbing hands (driven by <see cref="SetLiveGrip"/>) and puts every spawned prop
+    /// back where it was once a recording or playback ends.
     /// </summary>
     public class FilmDirector : MonoBehaviour
     {
@@ -59,6 +62,14 @@ namespace ChimeralTheater.Films
         /// <summary>The performer's own avatar while one is worn or the selected act has one; null otherwise.</summary>
         public ChaviAvatar SelfAvatar => selfAvatar;
 
+        readonly PropSnapshot propSnapshot = new PropSnapshot();
+        PropGrabber liveLeftHand;
+        PropGrabber liveRightHand;
+        bool leftGripHeld;
+        bool rightGripHeld;
+        bool leftGripWasHeld;
+        bool rightGripWasHeld;
+
         Transform body;
         Transform head;
         Transform leftHand;
@@ -78,6 +89,15 @@ namespace ChimeralTheater.Films
         void OnDestroy()
         {
             DisposeSelfAvatar();
+            liveLeftHand?.Destroy();
+            liveRightHand?.Destroy();
+        }
+
+        /// <summary>The performer's grip buttons, set every frame by the input layer.</summary>
+        public void SetLiveGrip(bool left, bool right)
+        {
+            leftGripHeld = left;
+            rightGripHeld = right;
         }
 
         /// <summary>Points the recorder at the performer's transforms. Tests call this directly since Awake does not run in edit mode.</summary>
@@ -236,6 +256,7 @@ namespace ChimeralTheater.Films
                     recorder.WriteTo(SelectedAct);
                     ActStore.Save(OpenTake, SelectedAct);
                     ClearStage();
+                    ResetProps();
                     SetState(DirectorState.Idle);
                     Changed?.Invoke();
                     break;
@@ -257,6 +278,7 @@ namespace ChimeralTheater.Films
                 throw new InvalidOperationException("The take has no recorded acts.");
 
             SessionTime = 0f;
+            propSnapshot.Capture();
             foreach (Act act in OpenTake.Acts)
             {
                 if (act.IsEmpty)
@@ -280,8 +302,10 @@ namespace ChimeralTheater.Films
                     CountdownRemaining -= dt;
                     if (CountdownRemaining <= 0f)
                     {
-                        // The recording clock starts at zero the moment the countdown ends.
+                        // The recording clock starts at zero the moment the countdown ends, and the
+                        // props are put back to where they are now once the recording stops.
                         SessionTime = 0f;
+                        propSnapshot.Capture();
                         SetState(DirectorState.Recording);
                     }
                     else
@@ -294,7 +318,7 @@ namespace ChimeralTheater.Films
 
                 case DirectorState.Recording:
                     SessionTime += dt;
-                    recorder.Tick(dt, body, head, leftHand, rightHand);
+                    recorder.Tick(dt, body, head, leftHand, rightHand, leftGripHeld, rightGripHeld);
                     EvaluateStage(SessionTime);
                     break;
 
@@ -310,6 +334,7 @@ namespace ChimeralTheater.Films
                     if (SessionTime > longest)
                     {
                         ClearStage();
+                        ResetProps();
                         SetState(DirectorState.Idle);
                         Changed?.Invoke();
                     }
@@ -317,7 +342,46 @@ namespace ChimeralTheater.Films
                     break;
             }
 
+            UpdateLiveHands(dt);
             UpdateSelfAvatar();
+        }
+
+        /// <summary>Moves the performer's grabbing hands to the controllers and grips or releases
+        /// on the grip buttons. Runs in every state, so props can be handled outside recordings too.</summary>
+        void UpdateLiveHands(float dt)
+        {
+            UpdateLiveHand(ref liveLeftHand, "Live Left Hand", leftHand, leftGripHeld, ref leftGripWasHeld, dt);
+            UpdateLiveHand(ref liveRightHand, "Live Right Hand", rightHand, rightGripHeld, ref rightGripWasHeld, dt);
+        }
+
+        /// <summary>A press grabs whatever the hand touches at that moment, exactly like a replayed
+        /// press; holding the grip and then touching a prop does not grab it.</summary>
+        static void UpdateLiveHand(ref PropGrabber grabber, string name, Transform hand, bool gripHeld, ref bool gripWasHeld, float dt)
+        {
+            bool pressed = gripHeld && !gripWasHeld;
+            bool released = !gripHeld && gripWasHeld;
+            gripWasHeld = gripHeld;
+
+            if (hand == null)
+                return;
+
+            grabber ??= new PropGrabber(name);
+            ActPose pose = ActPose.FromTransform(hand);
+            grabber.MoveTo(pose, dt);
+
+            if (pressed)
+                grabber.Grip(pose);
+            else if (released)
+                grabber.Release();
+        }
+
+        /// <summary>Lets go of everything the performer holds and puts the props back where they
+        /// were when the recording or playback started.</summary>
+        void ResetProps()
+        {
+            liveLeftHand?.Release();
+            liveRightHand?.Release();
+            propSnapshot.Restore();
         }
 
         /// <summary>The avatar the performer should see themselves as right now: the selected act's avatar

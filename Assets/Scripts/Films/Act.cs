@@ -4,11 +4,23 @@ using UniRes;
 
 namespace ChimeralTheater.Films
 {
+    /// <summary>A grip button press or release recorded in an act's action layer.</summary>
+    public enum ActAction
+    {
+        LeftGrip = 0,
+        LeftRelease = 1,
+        RightGrip = 2,
+        RightRelease = 3,
+    }
+
     /// <summary>
     /// One recorded performance: timestamped frames of the performer's body, head and hands.
     /// Frames are stored as two parallel flat arrays so the file stays compact:
     /// <see cref="Times"/> holds one timestamp per frame and <see cref="Poses"/> holds
-    /// <see cref="FloatsPerFrame"/> floats per frame.
+    /// <see cref="FloatsPerFrame"/> floats per frame. On top of the poses sits an action layer:
+    /// the grip presses and releases, as parallel <see cref="ActionTimes"/> and <see cref="ActionCodes"/>
+    /// arrays. Actions are re-simulated on playback, so a replayed grip grabs whatever prop the
+    /// replayed hand is touching at that moment.
     /// </summary>
     public class Act : Resource
     {
@@ -34,6 +46,14 @@ namespace ChimeralTheater.Films
         /// <summary>Body, head, left hand and right hand poses, <see cref="FloatsPerFrame"/> floats per frame.</summary>
         [Export] public float[] Poses = Array.Empty<float>();
 
+        /// <summary>Seconds since the recording started, one per action, ascending.</summary>
+        [Export] public float[] ActionTimes = Array.Empty<float>();
+
+        /// <summary>One <see cref="ActAction"/> per entry in <see cref="ActionTimes"/>.</summary>
+        [Export] public int[] ActionCodes = Array.Empty<int>();
+
+        public int ActionCount => ActionTimes?.Length ?? 0;
+
         /// <summary>True when nothing has been recorded into this act yet.</summary>
         public bool IsEmpty => FrameCount == 0;
 
@@ -56,11 +76,27 @@ namespace ChimeralTheater.Films
             Duration = FrameCount == 0 ? 0f : Times[FrameCount - 1];
         }
 
+        /// <summary>Replaces the action layer. Throws if the codes do not match the timestamps.</summary>
+        public void SetActions(List<float> times, List<int> codes)
+        {
+            if (times == null)
+                throw new ArgumentNullException(nameof(times));
+            if (codes == null)
+                throw new ArgumentNullException(nameof(codes));
+            if (times.Count != codes.Count)
+                throw new ArgumentException($"Expected {times.Count} action codes but got {codes.Count}.");
+
+            ActionTimes = times.ToArray();
+            ActionCodes = codes.ToArray();
+        }
+
         /// <summary>Drops the frame data from memory. The count and duration are kept; reload from the act's file to play it.</summary>
         public void ReleaseFrames()
         {
             Times = Array.Empty<float>();
             Poses = Array.Empty<float>();
+            ActionTimes = Array.Empty<float>();
+            ActionCodes = Array.Empty<int>();
         }
 
         /// <summary>

@@ -113,6 +113,3 @@ InitTestScene*.unity*
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
 /Ignore
-*.meta
-!/Assets/Scripts/VRDashboard.cs.meta
-*.meta

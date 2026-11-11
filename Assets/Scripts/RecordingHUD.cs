@@ -55,7 +55,7 @@ namespace ChimeralTheater.UI
                 hmd = Camera.main;
 
             if (follower == null && panel != null)
-                follower = panel.GetComponent<FloatingUIFollower>() ?? panel.AddComponent<FloatingUIFollower>();
+                follower = panel.GetComponent<FloatingUIFollower>();
 
             if (follower != null)
                 follower.Viewer = hmd != null ? hmd.transform : null;

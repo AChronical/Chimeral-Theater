@@ -1,5 +1,4 @@
 using ChimeralTheater.Films;
-using ChimeralTheater.Locomotion;
 using ChimeralTheater.Props;
 using ChimeralTheater.UI;
 using UnityEditor;
@@ -7,7 +6,15 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using UnityEngine.XR.Interaction.Toolkit.Inputs;
+using UnityEngine.XR.Interaction.Toolkit.Inputs.Readers;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
+using UnityEngine.XR.Interaction.Toolkit.Interactors.Visuals;
+using UnityEngine.XR.Interaction.Toolkit.Locomotion.Movement;
+using UnityEngine.XR.Interaction.Toolkit.Locomotion.Turning;
+using UnityEngine.XR.Interaction.Toolkit.UI;
 
 namespace ChimeralTheater.Editor
 {
@@ -57,6 +64,10 @@ namespace ChimeralTheater.Editor
                 return true;
 
             if (prefab.GetComponentInChildren<FloatingUIFollower>(true) == null)
+                return true;
+
+            // The prefab predates XRI UI input: the canvas must take tracked-device rays.
+            if (prefab.GetComponentInChildren<TrackedDeviceGraphicRaycaster>(true) == null)
                 return true;
 
             if (prefab.GetComponentInChildren<FilmsPanel>(true) == null)
@@ -114,7 +125,7 @@ namespace ChimeralTheater.Editor
             VRDashboard dash = root.AddComponent<VRDashboard>();
 
             // Panel Root with World Space Canvas
-            GameObject panel = new GameObject("Panel", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster), typeof(Image));
+            GameObject panel = new GameObject("Panel", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(TrackedDeviceGraphicRaycaster), typeof(Image));
             panel.transform.SetParent(root.transform, false);
 
             Canvas canvas = panel.GetComponent<Canvas>();
@@ -230,25 +241,8 @@ namespace ChimeralTheater.Editor
             Button filesTabBtn = CreateTabButton(tabBar.transform, "Files", font, out Image filesTabImg);
             Button inventoryTabBtn = CreateTabButton(tabBar.transform, "Inventory", font, out Image inventoryTabImg);
 
-            // Laser
-            GameObject laserObj = new GameObject("Laser", typeof(LineRenderer));
-            laserObj.transform.SetParent(root.transform, false);
-            LineRenderer laser = laserObj.GetComponent<LineRenderer>();
-            laser.useWorldSpace = true;
-            laser.positionCount = 2;
-            laser.startWidth = 0.005f;
-            laser.endWidth = 0.0015f;
-
-            Material laserMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Prefabs/LaserMaterial.mat");
-            if (laserMat != null)
-                laser.sharedMaterial = laserMat;
-
-            laser.startColor = new Color(0.1f, 0.85f, 1f, 0.9f);
-            laser.endColor = new Color(0.1f, 0.85f, 1f, 0.2f);
-
             // Wire all references into VRDashboard component
             dash.Panel = panel;
-            dash.Laser = laser;
             dash.TabTitleText = titleText;
             dash.SettingsContent = settingsContent;
             dash.FilmsContent = filmsContent;
@@ -270,7 +264,6 @@ namespace ChimeralTheater.Editor
 
             // Visuals start disabled
             panel.SetActive(false);
-            laserObj.SetActive(false);
 
             // Save Prefab Asset
             GameObject savedPrefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabPath);
@@ -391,8 +384,9 @@ namespace ChimeralTheater.Editor
             GameObject buttonObj = new GameObject(label + " Tab", typeof(RectTransform), typeof(Image), typeof(Button));
             buttonObj.transform.SetParent(parent, false);
 
+            // White so the button's colour tint alone decides the tab colour.
             buttonImage = buttonObj.GetComponent<Image>();
-            buttonImage.color = new Color(0.2f, 0.2f, 0.22f, 0.95f);
+            buttonImage.color = Color.white;
             buttonImage.raycastTarget = true;
 
             Button button = buttonObj.GetComponent<Button>();
@@ -1159,16 +1153,18 @@ namespace ChimeralTheater.Editor
             {
                 // Wire inspector references
                 InputActionAsset actions = AssetDatabase.LoadAssetAtPath<InputActionAsset>(InputAssetPath);
-                VRLocomotion loco = Object.FindFirstObjectByType<VRLocomotion>();
                 Camera cam = Camera.main ?? Object.FindFirstObjectByType<Camera>();
                 GameObject leftHand = GameObject.Find("Left Hand");
                 GameObject rightHand = GameObject.Find("Right Hand");
 
                 sceneDash.InputActions = actions;
-                sceneDash.Locomotion = loco;
+                sceneDash.MoveProvider = Object.FindFirstObjectByType<ContinuousMoveProvider>();
+                sceneDash.TurnProvider = Object.FindFirstObjectByType<ContinuousTurnProvider>();
                 sceneDash.Hmd = cam;
                 sceneDash.LeftHand = leftHand != null ? leftHand.transform : null;
-                sceneDash.RightHand = rightHand != null ? rightHand.transform : null;
+                sceneDash.UIRay = rightHand != null ? EnsureUIRay(rightHand.transform, actions) : null;
+                EnsureEventSystem();
+                EnsureActionsEnabled(actions);
                 EnsurePropGripInput(actions);
 
                 EditorUtility.SetDirty(sceneDash);
@@ -1176,6 +1172,55 @@ namespace ChimeralTheater.Editor
                 EditorSceneManager.SaveScene(scene);
                 Debug.Log("[VRDashboardPrefabBuilder] Configured VRDashboard prefab instance in scene.");
             }
+        }
+
+        /// <summary>The right hand's UI ray: an XR Ray Interactor that only talks to UI, pressed with
+        /// the UIInteract action, drawn by the XRI line visual.</summary>
+        private static XRRayInteractor EnsureUIRay(Transform rightHand, InputActionAsset actions)
+        {
+            XRRayInteractor ray = rightHand.GetComponentInChildren<XRRayInteractor>(true);
+            if (ray == null)
+            {
+                var rayObj = new GameObject("UI Ray", typeof(LineRenderer), typeof(XRRayInteractor), typeof(XRInteractorLineVisual));
+                rayObj.transform.SetParent(rightHand, false);
+                ray = rayObj.GetComponent<XRRayInteractor>();
+            }
+
+            ray.enableUIInteraction = true;
+            ray.maxRaycastDistance = 10f;
+            ray.selectInput.inputSourceMode = XRInputButtonReader.InputSourceMode.Unused;
+            ray.activateInput.inputSourceMode = XRInputButtonReader.InputSourceMode.Unused;
+            ray.uiScrollInput.inputSourceMode = XRInputValueReader.InputSourceMode.Unused;
+            ray.translateManipulationInput.inputSourceMode = XRInputValueReader.InputSourceMode.Unused;
+            ray.rotateManipulationInput.inputSourceMode = XRInputValueReader.InputSourceMode.Unused;
+            ray.directionalManipulationInput.inputSourceMode = XRInputValueReader.InputSourceMode.Unused;
+            ray.scaleToggleInput.inputSourceMode = XRInputButtonReader.InputSourceMode.Unused;
+            ray.scaleOverTimeInput.inputSourceMode = XRInputValueReader.InputSourceMode.Unused;
+            ray.scaleDistanceDeltaInput.inputSourceMode = XRInputValueReader.InputSourceMode.Unused;
+
+            InputActionReference press = FindActionReference(actions, "UIInteract");
+            ray.uiPressInput.inputSourceMode = XRInputButtonReader.InputSourceMode.InputActionReference;
+            ray.uiPressInput.inputActionReferencePerformed = press;
+            ray.uiPressInput.inputActionReferenceValue = press;
+
+            var line = ray.GetComponent<LineRenderer>();
+            Material laserMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Prefabs/LaserMaterial.mat");
+            if (laserMat != null)
+                line.sharedMaterial = laserMat;
+
+            var visual = ray.GetComponent<XRInteractorLineVisual>();
+            visual.lineWidth = 0.005f;
+            visual.lineLength = 10f;
+            var laser = new Gradient();
+            laser.SetKeys(
+                new[] { new GradientColorKey(new Color(0.1f, 0.85f, 1f), 0f), new GradientColorKey(new Color(0.1f, 0.85f, 1f), 1f) },
+                new[] { new GradientAlphaKey(0.9f, 0f), new GradientAlphaKey(0.2f, 1f) });
+            visual.validColorGradient = laser;
+            visual.invalidColorGradient = laser;
+
+            ray.gameObject.SetActive(false);
+            EditorUtility.SetDirty(ray.gameObject);
+            return ray;
         }
 
         private static void EnsurePropGripInput(InputActionAsset actions)
@@ -1190,6 +1235,45 @@ namespace ChimeralTheater.Editor
             grip.Director = director;
             grip.InputActions = actions;
             EditorUtility.SetDirty(grip);
+        }
+
+        private static void EnsureEventSystem()
+        {
+            EventSystem eventSystem = Object.FindFirstObjectByType<EventSystem>(FindObjectsInactive.Include);
+            if (eventSystem == null)
+                eventSystem = new GameObject("EventSystem", typeof(EventSystem)).GetComponent<EventSystem>();
+
+            foreach (BaseInputModule module in eventSystem.GetComponents<BaseInputModule>())
+                if (!(module is XRUIInputModule))
+                    Object.DestroyImmediate(module);
+
+            if (eventSystem.GetComponent<XRUIInputModule>() == null)
+                eventSystem.gameObject.AddComponent<XRUIInputModule>();
+        }
+
+        /// <summary>XRI input readers read actions but do not enable them; the origin's Input Action
+        /// Manager enables the whole asset.</summary>
+        private static void EnsureActionsEnabled(InputActionAsset actions)
+        {
+            var manager = Object.FindFirstObjectByType<InputActionManager>();
+            if (manager == null || actions == null)
+                return;
+
+            if (manager.actionAssets == null)
+                manager.actionAssets = new System.Collections.Generic.List<InputActionAsset>();
+            if (!manager.actionAssets.Contains(actions))
+                manager.actionAssets.Add(actions);
+            EditorUtility.SetDirty(manager);
+        }
+
+        internal static InputActionReference FindActionReference(InputActionAsset actions, string actionName)
+        {
+            if (actions == null)
+                return null;
+            foreach (Object asset in AssetDatabase.LoadAllAssetsAtPath(AssetDatabase.GetAssetPath(actions)))
+                if (asset is InputActionReference reference && reference.action != null && reference.action.name == actionName)
+                    return reference;
+            return null;
         }
     }
 }
